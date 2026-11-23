@@ -1,0 +1,82 @@
+# GARILLA_GARAGE — настройки веб-сервера Apache для статического сайта.
+#
+# Файл попадает в корень сборки рядом с index.html и начинает работать сразу после распаковки архива
+# на хостинге с Apache (так устроено большинство виртуальных хостингов). На сервере с одним nginx
+# он не действует — настройки для nginx приведены в README.md проекта, раздел «Размещение на хостинге».
+#
+# Все необязательные блоки обёрнуты в <IfModule>: если модуля на хостинге нет, блок просто пропускается.
+
+AddDefaultCharset UTF-8
+
+# Несуществующий адрес отдаёт страницу 404 с настоящим статусом 404.
+# Правило «любой адрес → index.html» включать нельзя: у сайта нет клиентского роутера.
+ErrorDocument 404 /404.html
+
+# Каталог открывается своим index.html; адрес каталога без слэша переадресуется на адрес со слэшем
+DirectoryIndex index.html
+<IfModule mod_dir.c>
+  DirectorySlash On
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # www → без www. Основной адрес сайта — без www: он записан в canonical и sitemap.xml.
+  # В панели хостинга основным тоже должен быть адрес без www, иначе два правила зациклятся.
+  RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
+  RewriteRule ^ https://%1%{REQUEST_URI} [R=301,L]
+
+  # http → https. Включается ОДНИМ способом: переключателем в панели хостинга (предпочтительно)
+  # либо тремя строками ниже. Здесь правило выключено: там, где перед Apache стоит nginx,
+  # проверка %{HTTPS} не видит защищённое соединение и уводит сайт в бесконечную переадресацию.
+  # Чтобы включить, уберите «#» в начале трёх строк и сразу проверьте, что сайт открывается.
+  # RewriteCond %{HTTPS} !=on
+  # RewriteCond %{HTTP:X-Forwarded-Proto} !https
+  # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+  # /index.html → / : у страницы один адрес
+  RewriteCond %{THE_REQUEST} \s/+(.*/)?index\.html[\s?] [NC]
+  RewriteRule ^ /%1 [R=301,L]
+</IfModule>
+
+# Типы файлов, которых может не быть в настройках сервера
+<IfModule mod_mime.c>
+  AddType image/webp .webp
+  AddType font/woff2 .woff2
+  AddType application/wasm .wasm
+  AddType model/gltf-binary .glb
+</IfModule>
+
+# Сжатие текстовых файлов при передаче (директиву даёт mod_filter, само сжатие — mod_deflate)
+<IfModule mod_deflate.c>
+  <IfModule mod_filter.c>
+    AddOutputFilterByType DEFLATE text/html text/css text/plain text/xml text/javascript application/javascript application/json application/xml image/svg+xml application/wasm
+  </IfModule>
+</IfModule>
+
+<IfModule mod_headers.c>
+  # Скрипты, стили и шрифты сборки лежат в /assets/ с хэшем в имени: содержимое файла с таким
+  # именем не меняется никогда, поэтому браузер хранит его год и не переспрашивает сервер
+  <FilesMatch "\.(js|css|woff2|wasm)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+
+  # Картинки и 3D-модель: 30 дней. У них имена без хэша — заменённое под тем же именем фото
+  # постоянный посетитель увидит не сразу; новому фото надёжнее дать новое имя
+  <FilesMatch "\.(webp|jpg|jpeg|png|ico|svg|glb)$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+
+  # Страницы, sitemap.xml и robots.txt — браузер каждый раз сверяется с сервером:
+  # после новой выкладки посетитель сразу получает свежую версию
+  <FilesMatch "\.(html|xml|txt)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+
+  # Заголовки безопасности, которые нельзя задать мета-тегом (дополняют политику из seo/csp.ts)
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  # Запрет показывать сайт во фрейме на чужих страницах. Если подключите Вебвизор Яндекс Метрики,
+  # эту строку нужно убрать: Вебвизор воспроизводит визиты именно во фрейме
+  Header always set X-Frame-Options "SAMEORIGIN"
+</IfModule>
